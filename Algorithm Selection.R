@@ -27,9 +27,8 @@ segment_data<-function(file,m){
     datasize<<-m
     data<-sample(1:nrow(file), m)
     data<-as.data.frame(file[data,])
-    
-
-    
+    maindata<<-generic_preprocess(data)
+    data<-maindata
   
     # Use 70% for train and valid, 30% for test from the selected data
     inTrain_valid <- sample(1:nrow(data), floor(dim(data)[1]*0.7))
@@ -40,7 +39,9 @@ segment_data<-function(file,m){
     
     # Assign the data to each segment
     Train<-Train_valid[inTrain,]
+    
     Valid<-Train_valid[-inTrain,]
+    # Remove the single factor columns
     Test <- data[-inTrain_valid,]
     
     # Create a list to retrun the files
@@ -50,6 +51,57 @@ segment_data<-function(file,m){
  
 }
 
+generic_preprocess<-function(datasets){
+  force(datasets)
+  datasets<-as.data.frame(datasets)
+  
+  exclude_names<-c("id","member_id","out_prncp","out_prncp_inv","url","desc")
+  for (features in exclude_names){
+    datasets<-datasets[-which(colnames(datasets)==features)]
+  }
+
+  # datasets<-datasets[-c("out_prncp","out_prncp_inv ")]
+  x<-datasets
+  datasets<-unique(x)
+  
+  # Remove the single factor columns
+  datasets<-datasets[, sapply(datasets, function(col) length(unique(col))) > 1]
+
+  # correct int_rate to integer
+  datasets$int_rate<-gsub(" ","", datasets$int_rate)
+  datasets$int_rate<-gsub("%","", datasets$int_rate)
+  datasets$int_rate<-as.numeric(datasets$int_rate)
+  
+  # correct revol_util to integer
+  datasets$revol_util<-gsub(" ","", datasets$revol_util)
+  datasets$revol_util<-gsub("%","", datasets$revol_util)  
+  datasets$revol_util<-as.numeric(datasets$revol_util)
+  
+  
+  # #Convert Dates into numeric numbers
+  datasets$issue_d <- mdy(datasets$issue_d)
+  datasets$issue_d<-as.numeric(datasets$issue_d)
+  datasets$earliest_cr_line <- mdy(datasets$earliest_cr_line)
+  datasets$earliest_cr_line<-as.numeric(datasets$earliest_cr_line)
+  datasets$last_pymnt_d <- mdy(datasets$last_pymnt_d)
+  datasets$last_pymnt_d<-as.numeric(datasets$last_pymnt_d)
+  datasets$next_pymnt_d <- mdy(datasets$next_pymnt_d)
+  datasets$next_pymnt_d<-as.numeric(datasets$next_pymnt_d)
+  datasets$last_credit_pull_d <- mdy(datasets$last_credit_pull_d)
+  datasets$last_credit_pull_d<-as.numeric(datasets$last_credit_pull_d)
+  
+  datasets[is.na(datasets)]<- -1000
+ 
+   for (columns in colnames(datasets)){
+    if (is.character(datasets[,columns])& !columns=="loan_status") {
+      datasets[,columns]<-factor(datasets[,columns])
+    }
+  }
+  
+  out<-as.data.frame(datasets)
+  return(out)
+  
+}
 
 
 
@@ -63,82 +115,44 @@ preprocess<-function(datasets){
     if (k>1) {  
       b<-colnames(datasets[[k]]) %in% colnames(datasets[[1]])
       datasets[[k]]<-datasets[[k]][,which(b==TRUE)]
-      datasets[[k]][is.na(datasets[[k]])]<- -1000
+      datasets[[k]]<-generic_preprocess(datasets[[k]])
+      # datasets[[k]][is.na(datasets[[k]])]<- -1000
     }
-    else{    
+    else{
       datasets[[k]]<-datasets[[k]][-1]
       datasets[[k]]<-datasets[[k]][-1]
-      # datasets[[k]]<-datasets[[k]][-c("out_prncp","out_prncp_inv ")]
-      datasets[[k]][is.na(datasets[[k]])]<- -1000
-      x<-datasets[[k]]
-      datasets[[k]]<-unique(x)
-      
-      # Remove the single factor columns
-      datasets[[k]]<-datasets[[k]][, sapply(datasets[[k]], function(col) length(unique(col))) > 1]
       # Remove columns that should not be used for prediction
       datasets[[k]]<-datasets[[k]][-34]
       datasets[[k]]<-datasets[[k]][-34]
       datasets[[k]]<-datasets[[k]][-34]
+      datasets[[k]]<-datasets[[k]][-8]
+      datasets[[k]]<-generic_preprocess(datasets[[k]])
     }
-      # correct int_rate to integer
-      datasets[[k]]$int_rate<-gsub(" ","", datasets[[k]]$int_rate)
-      datasets[[k]]$int_rate<-gsub("%","", datasets[[k]]$int_rate)
-      datasets[[k]]$int_rate<-as.numeric(datasets[[k]]$int_rate)
-      
-      # correct revol_util to integer
-      datasets[[k]]$revol_util<-gsub(" ","", datasets[[k]]$revol_util)
-      datasets[[k]]$revol_util<-gsub("%","", datasets[[k]]$revol_util)  
-      datasets[[k]]$revol_util<-as.numeric(datasets[[k]]$revol_util)
-      
-      # Convert Grade into numeric factors
-      datasets[[k]]$grade<-factor(datasets[[k]]$grade)
-      datasets[[k]]$grade<-as.numeric( datasets[[k]]$grade)
-      
-      # Convert Purpose into numeric factors
-      datasets[[k]]$purpose<-factor(datasets[[k]]$purpose)
-      datasets[[k]]$purpose<- as.numeric(datasets[[k]]$purpose)
-      
-      # Convert loan status into numeric factors
-      datasets[[k]]$loan_status<-factor(datasets[[k]]$loan_status)
-      datasets[[k]]$loan_status<-as.numeric(datasets[[k]]$loan_status)
-      datasets[[k]]$loan_status<-factor(datasets[[k]]$loan_status)
-      
-      # #Convert Dates into numeric numbers
-      datasets[[k]]$issue_d <- mdy(datasets[[k]]$issue_d)
-      datasets[[k]]$issue_d<-as.numeric(datasets[[k]]$issue_d)
-      datasets[[k]]$earliest_cr_line <- mdy(datasets[[k]]$earliest_cr_line)
-      datasets[[k]]$earliest_cr_line<-as.numeric(datasets[[k]]$earliest_cr_line)
-      datasets[[k]]$last_pymnt_d <- mdy(datasets[[k]]$last_pymnt_d)
-      datasets[[k]]$last_pymnt_d<-as.numeric(datasets[[k]]$last_pymnt_d)
-      datasets[[k]]$next_pymnt_d <- mdy(datasets[[k]]$next_pymnt_d)
-      datasets[[k]]$next_pymnt_d<-as.numeric(datasets[[k]]$next_pymnt_d)
-      datasets[[k]]$last_credit_pull_d <- mdy(datasets[[k]]$last_credit_pull_d)
-      datasets[[k]]$last_credit_pull_d<-as.numeric(datasets[[k]]$last_credit_pull_d)
   }
   
   # Set the lists to data frame for train, validation and test sets
   #Convert all 'chr' columns to factors
   #data<-as.data.frame(apply(data,2,convert_factor) )
-  train<-as.data.frame(apply(datasets[[1]],2,convert_factor))
-  valid<-as.data.frame(apply(datasets[[2]],2,convert_factor))
-  test<-as.data.frame(apply(datasets[[3]],2,convert_factor))
-  
+  train<-as.data.frame(datasets[[1]])
+  valid<-as.data.frame(datasets[[2]])
+  test<-as.data.frame(datasets[[3]])
   # return the data sets
   out<-list(train,valid,test)
   
   return(out)
 }
 
-convert_factor<-function(x) {
-  force(x)
-
-    if(is.character(x)){ 
-      x<-factor(x)
-      as.numeric(x)
-    }
-    #x<- factor(x)
-    
-}
+# convert_factor<-function(x) {
+#   force(x)
+# 
+#     if(!is.character(x)==TRUE){ 
+#         x<-factor(x)
+#        # x<-as.numeric(x)
+#     }
+#     #x<- factor(x)
+#   return(x)
+#     
+# }
 
 # Create Learning curve to see if there exists bias or variance with selected model
 
@@ -150,7 +164,23 @@ model_run<-function(sets,method,...){
   validdata<<-sets[[2]]
   testdata<<-sets[[3]]
   
+
+  
+  for (columns in colnames(traindata)){
+    if (is.factor(maindata[columns])){
+      levels(traindata[columns])<-union(levels(traindata[columns]), levels(maindata[columns]))
+      levels(validdata[columns])<-union(levels(validdata[columns]), levels(maindata[columns]))
+      levels(testdata[columns])<-union(levels(testdata[columns]), levels(maindata[columns]))
+    }
+  }
+  print(str(traindata))
+  print(str(validdata))
+  print(str(testdata))
+  # std_levels(traindata,validdata)
+  # std_levels(validdata,testdata)
   train_fit<-train(loan_status~., data = traindata ,method = method,...)
+  #set levels same for character columns
+  #levelchar<-apply(traindata,function(x) )
   valid_fit<-predict(train_fit,validdata)
   test_fit<-predict(train_fit,testdata)
   print(train_fit)
@@ -158,6 +188,16 @@ model_run<-function(sets,method,...){
   return(out)
   
 }
+
+# std_levels<-function(train,valid){
+#   
+#   if (is.factor(valid)){
+#     # loops through factors and standardizes the levels
+#     for (f in 1:length(names(train))) {
+#         levels(valid[,f]) = union(levels(valid[,f]),levels(train[,f]))
+#     }
+#   }
+# }
 
 general_call_err<-function(act,pred){
   force(pred)
