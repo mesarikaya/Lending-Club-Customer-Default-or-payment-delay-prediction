@@ -8,6 +8,7 @@ library(ggplot2)
 library(doParallel)
 library(data.table)
 library(lattice)
+library(lubridate)
 library(xgboost)
 
 # Decide the data size
@@ -25,11 +26,10 @@ segment_data<-function(file,m){
     # Set the data to size m
     datasize<<-m
     data<-sample(1:nrow(file), m)
-    data<-file[data,]
+    data<-as.data.frame(file[data,])
     
-    #Convert all 'chr' columns to factors
-    data<-as.data.frame(apply(data,2,convert_factor) )
 
+    
   
     # Use 70% for train and valid, 30% for test from the selected data
     inTrain_valid <- sample(1:nrow(data), floor(dim(data)[1]*0.7))
@@ -75,6 +75,7 @@ preprocess<-function(datasets){
       
       # Remove the single factor columns
       datasets[[k]]<-datasets[[k]][, sapply(datasets[[k]], function(col) length(unique(col))) > 1]
+      # Remove columns that should not be used for prediction
       datasets[[k]]<-datasets[[k]][-34]
       datasets[[k]]<-datasets[[k]][-34]
       datasets[[k]]<-datasets[[k]][-34]
@@ -84,6 +85,10 @@ preprocess<-function(datasets){
       datasets[[k]]$int_rate<-gsub("%","", datasets[[k]]$int_rate)
       datasets[[k]]$int_rate<-as.numeric(datasets[[k]]$int_rate)
       
+      # correct revol_util to integer
+      datasets[[k]]$revol_util<-gsub(" ","", datasets[[k]]$revol_util)
+      datasets[[k]]$revol_util<-gsub("%","", datasets[[k]]$revol_util)  
+      datasets[[k]]$revol_util<-as.numeric(datasets[[k]]$revol_util)
       
       # Convert Grade into numeric factors
       datasets[[k]]$grade<-factor(datasets[[k]]$grade)
@@ -97,13 +102,26 @@ preprocess<-function(datasets){
       datasets[[k]]$loan_status<-factor(datasets[[k]]$loan_status)
       datasets[[k]]$loan_status<-as.numeric(datasets[[k]]$loan_status)
       datasets[[k]]$loan_status<-factor(datasets[[k]]$loan_status)
-
+      
+      # #Convert Dates into numeric numbers
+      datasets[[k]]$issue_d <- mdy(datasets[[k]]$issue_d)
+      datasets[[k]]$issue_d<-as.numeric(datasets[[k]]$issue_d)
+      datasets[[k]]$earliest_cr_line <- mdy(datasets[[k]]$earliest_cr_line)
+      datasets[[k]]$earliest_cr_line<-as.numeric(datasets[[k]]$earliest_cr_line)
+      datasets[[k]]$last_pymnt_d <- mdy(datasets[[k]]$last_pymnt_d)
+      datasets[[k]]$last_pymnt_d<-as.numeric(datasets[[k]]$last_pymnt_d)
+      datasets[[k]]$next_pymnt_d <- mdy(datasets[[k]]$next_pymnt_d)
+      datasets[[k]]$next_pymnt_d<-as.numeric(datasets[[k]]$next_pymnt_d)
+      datasets[[k]]$last_credit_pull_d <- mdy(datasets[[k]]$last_credit_pull_d)
+      datasets[[k]]$last_credit_pull_d<-as.numeric(datasets[[k]]$last_credit_pull_d)
   }
   
   # Set the lists to data frame for train, validation and test sets
-  train<-as.data.frame(datasets[[1]])
-  valid<-as.data.frame(datasets[[2]])
-  test<-as.data.frame(datasets[[3]])
+  #Convert all 'chr' columns to factors
+  #data<-as.data.frame(apply(data,2,convert_factor) )
+  train<-as.data.frame(apply(datasets[[1]],2,convert_factor))
+  valid<-as.data.frame(apply(datasets[[2]],2,convert_factor))
+  test<-as.data.frame(apply(datasets[[3]],2,convert_factor))
   
   # return the data sets
   out<-list(train,valid,test)
@@ -130,36 +148,49 @@ model_run<-function(sets,method,...){
   force(method)
   traindata<<-sets[[1]]
   validdata<<-sets[[2]]
+  testdata<<-sets[[3]]
   
   train_fit<-train(loan_status~., data = traindata ,method = method,...)
   valid_fit<-predict(train_fit,validdata)
+  test_fit<-predict(train_fit,testdata)
   print(train_fit)
-  out<-list(train_fit,valid_fit)
+  out<-list(train_fit,valid_fit,test_fit)
   return(out)
   
+}
+
+general_call_err<-function(act,pred){
+  force(pred)
+  force(act)
+  conf_matrix<-createConfusionMatrix(act, pred)
+  err_rate<-(sum(conf_matrix)-sum(diag(conf_matrix)))/sum(conf_matrix)*!00
+  return(err_rate)
 }
 
 calc_err_rate<-function(model){
   force(model)
   train_model<-model[[1]]
   valid_pred<-model[[2]]
-  
-  
-  ncol<-ncol(train_model$finalModel$confusion)
+
   #ncol2<-ncol(valid_model$finalModel$confusion)
   
-  train_model_confusion<-createConfusionMatrix(traindata$loan_status, valid_pred)
-  valid_model_confusion<-createConfusionMatrix(validdata$loan_status, valid_pred)
+  
+  
   #valid_model_confusion<-valid_model$finalModel$confusion[,-ncol2,drop=FALSE]
-   
+  ncol<-ncol(train_model$finalModel$confusion)
+  train_model_confusion<-train_model$finalModel$confusion[,-length(train_model$finalModel$confusion)]
   train_err<-sum(train_model_confusion)-sum(diag(train_model_confusion))
-  valid_err<-sum(valid_model_confusion)-sum(diag(valid_model_confusion))
-
   train_err_rate<-((train_err/sum(train_model_confusion)))*100
   train_err_rate<-as.data.frame(train_err_rate)
+  
+  valid_model_confusion<-createConfusionMatrix(validdata$loan_status, valid_pred)
+  valid_err<-sum(valid_model_confusion)-sum(diag(valid_model_confusion))
   valid_err_rate<-((valid_err/sum(valid_model_confusion)))*100
+  #valid_err_rate<-general_call_err(validdata$loanstatus,valid_pred)
   valid_err_rate<-as.data.frame(valid_err_rate)
+
   names(train_err_rate)<-names(valid_err_rate)
+
   train_err_rate$errortype<-"training"
   train_err_rate$datasize<-datasize
   valid_err_rate$errortype<-"validation"
@@ -168,7 +199,6 @@ calc_err_rate<-function(model){
   out<-rbind(train_err_rate,valid_err_rate)
   out<-as.data.frame(out)
   return(out)
-  
 }
 
 
@@ -227,9 +257,9 @@ create_learning_curve<- function (result){
 }
 
 run_model<-function(file){
-  cl <- makeCluster(4)
+  cl <- makeCluster(6)
   registerDoParallel(cl)
-  finalmodel<-lapply(seq(1000,20000,1000),function(x) general_call(file=file,datasize=x,method="rf") )
+  finalmodel<-lapply(seq(200000,200000,1000),function(x) general_call(file=file,datasize=x,method="rf",ntree=5000,mtry=10) )
   stopCluster(cl)
   return(finalmodel)
 }

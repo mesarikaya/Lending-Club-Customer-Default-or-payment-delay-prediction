@@ -13,7 +13,23 @@
 library (RCurl)
 library (XML)
 
-# Create Function to call the relevant webpage
+# Key function to call to scrape the website and start scraping, download and extraction process of csv files
+
+filenames<-function(htmladdress) {
+  
+  force(htmladdress)
+  # Call scrape function to retrieve the loan files
+  files<-scrape(htmladdress)
+  file_names<-unlist(strsplit(unlist(files)[-3],"[|]"))
+  #Retrieve the website prefix
+  download_prefix<-unlist(files)[3]
+  #For all files create a download link
+  links<-lapply(file_names, function(x)  paste0(download_prefix,x))
+  #For all files call the download function
+  lapply(links,function(x) download_files(x))
+}
+
+# Create Function to call the relevant webpage "https://www.lendingclub.com/info/download-data.action"
 # Parameter: 1) HTML address, 2) download link
 
 scrape<-function(htmladdress) {
@@ -45,23 +61,8 @@ scrape<-function(htmladdress) {
   
 }
 
-# Key function to call to scrape the website and start scraping, download and extraction process of csv files
 
-filenames<-function(htmladdress) {
-  
-  force(htmladdress)
-  # Call scrape function to retrieve the loan files
-  files<-scrape(htmladdress)
-  file_names<-unlist(strsplit(unlist(files)[-3],"[|]"))
-  #Retrieve the website prefix
-  download_prefix<-unlist(files)[3]
-  #For all files create a download link
-  links<-lapply(file_names, function(x)  paste0(download_prefix,x))
-  #For all files call the download function
-  lapply(links,function(x) download_files(x))
-}
-
-#Downloads the files from a provided link
+#Downloads the files from a provided link and call unzip
 i<-0
 download_files<-function(links,...){
   force(links)
