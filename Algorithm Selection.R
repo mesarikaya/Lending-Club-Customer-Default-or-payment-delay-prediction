@@ -55,7 +55,7 @@ generic_preprocess<-function(datasets){
   force(datasets)
   datasets<-as.data.frame(datasets)
   
-  exclude_names<-c("id","member_id","out_prncp","out_prncp_inv","url","desc")
+  exclude_names<-c("id","member_id","out_prncp","out_prncp_inv","url","desc","total_rec_prncp","collection_recovery_fee","recoveries")
   for (features in exclude_names){
     datasets<-datasets[-which(colnames(datasets)==features)]
   }
@@ -76,7 +76,26 @@ generic_preprocess<-function(datasets){
   datasets$revol_util<-gsub(" ","", datasets$revol_util)
   datasets$revol_util<-gsub("%","", datasets$revol_util)  
   datasets$revol_util<-as.numeric(datasets$revol_util)
+
   
+  # normalize the integer columns
+  names<-colnames(datasets)
+  datasets<-as.data.frame(lapply(colnames(datasets), function(x){if(is.numeric(datasets[,x])) {datasets[,x]<-scale(datasets[,x])};datasets[,x]}),stringsAsFactors=FALSE)
+
+  
+  colnames(datasets)<-names
+
+  # apply pca to numeric columns
+  #datasetrest<-as.data.frame(datasets[,sapply(colnames(datasets), function(x) !(is.numeric(datasets[,x])))],stringsAsFactors=FALSE)
+  #dataset_pca<-as.data.frame(datasets[,sapply(colnames(datasets), function(x) (is.numeric(datasets[,x])))],stringsAsFactors=FALSE)
+  #dataset_pca[is.na(dataset_pca)]<- -1000
+  
+  #print(str(dataset_pca))
+  #dataset_pca<-as.data.frame(apply_pca(dataset_pca))
+  #print(str(dataset_pca))
+  #print(dimnames(dataset_pca))
+  #datasets<-as.data.frame(cbind(datasetrest,dataset_pca),stringsAsFactors=FALSE)
+  #print(str(datasets))
   
   # #Convert Dates into numeric numbers
   datasets$issue_d <- mdy(datasets$issue_d)
@@ -89,21 +108,23 @@ generic_preprocess<-function(datasets){
   datasets$next_pymnt_d<-as.numeric(datasets$next_pymnt_d)
   datasets$last_credit_pull_d <- mdy(datasets$last_credit_pull_d)
   datasets$last_credit_pull_d<-as.numeric(datasets$last_credit_pull_d)
+
+  datasets[is.na(datasets)]<- -1
   
-  datasets[is.na(datasets)]<- -1000
  
    for (columns in colnames(datasets)){
     if (is.character(datasets[,columns])& !columns=="loan_status") {
       datasets[,columns]<-factor(datasets[,columns])
     }
-  }
+   }
   
-  out<-as.data.frame(datasets)
+
+  
+  out<-datasets
+  print(str(out))
   return(out)
   
 }
-
-
 
 # Preprocess data
 preprocess<-function(datasets){
@@ -119,14 +140,14 @@ preprocess<-function(datasets){
       # datasets[[k]][is.na(datasets[[k]])]<- -1000
     }
     else{
-      datasets[[k]]<-datasets[[k]][-1]
-      datasets[[k]]<-datasets[[k]][-1]
-      # Remove columns that should not be used for prediction
-      datasets[[k]]<-datasets[[k]][-34]
-      datasets[[k]]<-datasets[[k]][-34]
-      datasets[[k]]<-datasets[[k]][-34]
-      datasets[[k]]<-datasets[[k]][-8]
-      datasets[[k]]<-generic_preprocess(datasets[[k]])
+      # datasets[[k]]<-datasets[[k]][-1]
+      # datasets[[k]]<-datasets[[k]][-1]
+      # # Remove columns that should not be used for prediction
+      # datasets[[k]]<-datasets[[k]][-34]
+      # datasets[[k]]<-datasets[[k]][-34]
+      # datasets[[k]]<-datasets[[k]][-34]
+      # datasets[[k]]<-datasets[[k]][-8]
+      # datasets[[k]]<-generic_preprocess(datasets[[k]])
     }
   }
   
@@ -178,7 +199,13 @@ model_run<-function(sets,method,...){
   print(str(testdata))
   # std_levels(traindata,validdata)
   # std_levels(validdata,testdata)
+  
+  cl <- makeCluster(16)
+  registerDoParallel(cl)
   train_fit<-train(loan_status~., data = traindata ,method = method,...)
+  on.exit(stopCluster(cl))
+  stopCluster(cl)
+  
   #set levels same for character columns
   #levelchar<-apply(traindata,function(x) )
   valid_fit<-predict(train_fit,validdata)
@@ -203,7 +230,7 @@ general_call_err<-function(act,pred){
   force(pred)
   force(act)
   conf_matrix<-createConfusionMatrix(act, pred)
-  err_rate<-(sum(conf_matrix)-sum(diag(conf_matrix)))/sum(conf_matrix)*!00
+  err_rate<-(sum(conf_matrix)-sum(diag(conf_matrix)))/sum(conf_matrix)*100
   return(err_rate)
 }
 
@@ -296,10 +323,16 @@ create_learning_curve<- function (result){
    
 }
 
+apply_pca<- function(x){
+  x<-prcomp(x,center=FALSE,scale=FALSE)
+  x<-as.data.frame(x$x,)
+  return(x)
+}
+
 run_model<-function(file){
   cl <- makeCluster(6)
   registerDoParallel(cl)
-  finalmodel<-lapply(seq(200000,200000,1000),function(x) general_call(file=file,datasize=x,method="rf",ntree=5000,mtry=10) )
+  finalmodel<-lapply(seq(200000,200000,1000),function(x) general_call(file=file,datasize=x,method="rf",ntree=500,mtry=50) )
   stopCluster(cl)
   return(finalmodel)
 }
