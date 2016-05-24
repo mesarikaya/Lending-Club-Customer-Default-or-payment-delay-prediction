@@ -27,6 +27,7 @@ filenames<-function(htmladdress) {
   links<-lapply(file_names, function(x)  paste0(download_prefix,x))
   #For all files call the download function
   lapply(links,function(x) download_files(x))
+  lapp
 }
 
 # Create Function to call the relevant webpage "https://www.lendingclub.com/info/download-data.action"

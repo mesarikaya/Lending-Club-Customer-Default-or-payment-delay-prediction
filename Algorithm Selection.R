@@ -10,12 +10,13 @@ library(data.table)
 library(lattice)
 library(lubridate)
 library(xgboost)
+library(e1071)
+library(doSNOW)
 
 # Decide the data size
 # m: the data size
 
-# Set a seed for consistency
-set.seed(100)
+
 
 
 # Create train, test and validation data
@@ -55,7 +56,7 @@ generic_preprocess<-function(datasets){
   force(datasets)
   datasets<-as.data.frame(datasets)
   
-  exclude_names<-c("id","member_id","out_prncp","out_prncp_inv","url","desc","total_rec_prncp","collection_recovery_fee","recoveries")
+  exclude_names<-c("id","member_id","out_prncp","out_prncp_inv","url","desc","total_rec_prncp","collection_recovery_fee","recoveries","emp_title","title","zip_code")
   for (features in exclude_names){
     datasets<-datasets[-which(colnames(datasets)==features)]
   }
@@ -78,25 +79,8 @@ generic_preprocess<-function(datasets){
   datasets$revol_util<-as.numeric(datasets$revol_util)
 
   
-  # normalize the integer columns
-  names<-colnames(datasets)
-  datasets<-as.data.frame(lapply(colnames(datasets), function(x){if(is.numeric(datasets[,x])) {datasets[,x]<-scale(datasets[,x])};datasets[,x]}),stringsAsFactors=FALSE)
+  
 
-  
-  colnames(datasets)<-names
-
-  # apply pca to numeric columns
-  #datasetrest<-as.data.frame(datasets[,sapply(colnames(datasets), function(x) !(is.numeric(datasets[,x])))],stringsAsFactors=FALSE)
-  #dataset_pca<-as.data.frame(datasets[,sapply(colnames(datasets), function(x) (is.numeric(datasets[,x])))],stringsAsFactors=FALSE)
-  #dataset_pca[is.na(dataset_pca)]<- -1000
-  
-  #print(str(dataset_pca))
-  #dataset_pca<-as.data.frame(apply_pca(dataset_pca))
-  #print(str(dataset_pca))
-  #print(dimnames(dataset_pca))
-  #datasets<-as.data.frame(cbind(datasetrest,dataset_pca),stringsAsFactors=FALSE)
-  #print(str(datasets))
-  
   # #Convert Dates into numeric numbers
   datasets$issue_d <- mdy(datasets$issue_d)
   datasets$issue_d<-as.numeric(datasets$issue_d)
@@ -109,6 +93,30 @@ generic_preprocess<-function(datasets){
   datasets$last_credit_pull_d <- mdy(datasets$last_credit_pull_d)
   datasets$last_credit_pull_d<-as.numeric(datasets$last_credit_pull_d)
 
+  # Take out highly correlated variables
+ 
+  datasets_rest<-datasets[,!sapply(datasets,function(x) is.numeric(x))]
+
+  datasets_num<-datasets[,sapply(datasets,function(x) is.numeric(x))]
+
+  descrCor <-  cor(datasets_num[,sapply(datasets_num,function(x) is.numeric(x))],use="pairwise.complete.obs")
+  highlyCorDescr <- findCorrelation(descrCor, cutoff = .75,exact=FALSE)
+ 
+  highlyCorDescr<-highlyCorDescr[is.na(highlyCorDescr)==FALSE]
+
+  if (is.na(highlyCorDescr[1])==FALSE){
+
+    datasets_num <- datasets_num[,-highlyCorDescr]
+  }
+ 
+  datasets<-as.data.frame(cbind(datasets_rest,datasets_num),stringsAsFactors=FALSE )
+
+  # normalize the integer columns
+  names<-colnames(datasets)
+  datasets<-as.data.frame(lapply(colnames(datasets), function(x){if(is.numeric(datasets[,x])) {datasets[,x]<-scale(datasets[,x])};datasets[,x]}),stringsAsFactors=FALSE)
+  colnames(datasets)<-names
+  
+  # Convert all NAs to -1
   datasets[is.na(datasets)]<- -1
   
  
@@ -121,47 +129,46 @@ generic_preprocess<-function(datasets){
 
   
   out<-datasets
-  print(str(out))
   return(out)
   
 }
 
-# Preprocess data
-preprocess<-function(datasets){
-  force(datasets)
-
-  for (k in 1:length(datasets)){
-    # Set the data and process "NA" values
-    datasets[[k]]<-as.data.frame(datasets[[k]])
-    if (k>1) {  
-      b<-colnames(datasets[[k]]) %in% colnames(datasets[[1]])
-      datasets[[k]]<-datasets[[k]][,which(b==TRUE)]
-      datasets[[k]]<-generic_preprocess(datasets[[k]])
-      # datasets[[k]][is.na(datasets[[k]])]<- -1000
-    }
-    else{
-      # datasets[[k]]<-datasets[[k]][-1]
-      # datasets[[k]]<-datasets[[k]][-1]
-      # # Remove columns that should not be used for prediction
-      # datasets[[k]]<-datasets[[k]][-34]
-      # datasets[[k]]<-datasets[[k]][-34]
-      # datasets[[k]]<-datasets[[k]][-34]
-      # datasets[[k]]<-datasets[[k]][-8]
-      # datasets[[k]]<-generic_preprocess(datasets[[k]])
-    }
-  }
-  
-  # Set the lists to data frame for train, validation and test sets
-  #Convert all 'chr' columns to factors
-  #data<-as.data.frame(apply(data,2,convert_factor) )
-  train<-as.data.frame(datasets[[1]])
-  valid<-as.data.frame(datasets[[2]])
-  test<-as.data.frame(datasets[[3]])
-  # return the data sets
-  out<-list(train,valid,test)
-  
-  return(out)
-}
+# # Preprocess data
+# preprocess<-function(datasets){
+#   force(datasets)
+# 
+#   for (k in 1:length(datasets)){
+#     # Set the data and process "NA" values
+#     datasets[[k]]<-as.data.frame(datasets[[k]])
+#     if (k>1) {  
+#       b<-colnames(datasets[[k]]) %in% colnames(datasets[[1]])
+#       datasets[[k]]<-datasets[[k]][,which(b==TRUE)]
+#       datasets[[k]]<-generic_preprocess(datasets[[k]])
+#       # datasets[[k]][is.na(datasets[[k]])]<- -1000
+#     }
+#     else{
+#       # datasets[[k]]<-datasets[[k]][-1]
+#       # datasets[[k]]<-datasets[[k]][-1]
+#       # # Remove columns that should not be used for prediction
+#       # datasets[[k]]<-datasets[[k]][-34]
+#       # datasets[[k]]<-datasets[[k]][-34]
+#       # datasets[[k]]<-datasets[[k]][-34]
+#       # datasets[[k]]<-datasets[[k]][-8]
+#       # datasets[[k]]<-generic_preprocess(datasets[[k]])
+#     }
+#   }
+#   
+#   # Set the lists to data frame for train, validation and test sets
+#   #Convert all 'chr' columns to factors
+#   #data<-as.data.frame(apply(data,2,convert_factor) )
+#   train<-as.data.frame(datasets[[1]])
+#   valid<-as.data.frame(datasets[[2]])
+#   test<-as.data.frame(datasets[[3]])
+#   # return the data sets
+#   out<-list(train,valid,test)
+#   
+#   return(out)
+# }
 
 # convert_factor<-function(x) {
 #   force(x)
@@ -178,14 +185,15 @@ preprocess<-function(datasets){
 # Create Learning curve to see if there exists bias or variance with selected model
 
 model_run<-function(sets,method,...){
- 
+  # Set a seed for consistency
+  set.seed(100)
   force(sets)
   force(method)
+
   traindata<<-sets[[1]]
   validdata<<-sets[[2]]
   testdata<<-sets[[3]]
   
-
   
   for (columns in colnames(traindata)){
     if (is.factor(maindata[columns])){
@@ -194,16 +202,28 @@ model_run<-function(sets,method,...){
       levels(testdata[columns])<-union(levels(testdata[columns]), levels(maindata[columns]))
     }
   }
-  print(str(traindata))
-  print(str(validdata))
-  print(str(testdata))
+#   print(str(traindata))
+#   print(str(validdata))
+#   print(str(testdata))
   # std_levels(traindata,validdata)
   # std_levels(validdata,testdata)
-  
-  cl <- makeCluster(16)
+  #registerDoSEQ()
+  cl <- makeCluster(6)
+  registerDoSNOW(cl)
   registerDoParallel(cl)
-  train_fit<-train(loan_status~., data = traindata ,method = method,...)
-  on.exit(stopCluster(cl))
+  
+  predictornames<-colnames(traindata[,-which(colnames(traindata)=="loan_status")])
+
+  
+  outcomename<-which(colnames(traindata)=="loan_status")
+  outcome<-traindata[,outcomename,drop=FALSE]
+
+
+  train_fit<-train(x=traindata[,predictornames],y=traindata[,outcomename],method = method,...)
+  #train_fit<-randomForest(traindata[,predictornames],traindata[,"loan_status"],...)
+  
+  registerDoSEQ()
+  #on.exit(stopCluster(cl))
   stopCluster(cl)
   
   #set levels same for character columns
@@ -287,7 +307,7 @@ general_call<-function(file,datasize,method,...) {
   force(datasize)
   force(method)
   
-  result<-calc_err_rate(model_run(preprocess(segment_data(file,datasize)),method=method,...))
+  result<-calc_err_rate(model_run(segment_data(file,datasize),method=method,...))
   z<<-z+1 
   print(z)
   return(result)
@@ -298,20 +318,23 @@ general_call<-function(file,datasize,method,...) {
 
 create_learning_curve<- function (result){
   force(result)
-  
-      for (i in length(result)){
-        if (i==1) {
-          result[[i]]<-as.data.table(result[[i]])
+
+      for (t in seq(length(result))){
+        if (t==1) {
+          result[[t]]<-as.data.table(result[[t]])
+      
         }
         else{
-          result[[i]]<-as.data.table(rbind(result[[i-1]],result[[i]]))
+          result[[t]]<-as.data.table(rbind(result[[t-1]],result[[t]]))
+         
         }
       } 
 
   result<-result[[length(result)]]
 
   result<-as.data.frame(result,stringsAsFactors=TRUE)
-  
+ 
+ 
 #   plot(result$error ~ result$data_size, data=result, groups=factor(result$error_type))
 #          scales = list(x = list(at = 1:4, labels = levels(trans.factor))))
   g<-ggplot(data=result,aes(x= datasize, y=valid_err_rate,linetype=factor(errortype)))+
@@ -323,16 +346,13 @@ create_learning_curve<- function (result){
    
 }
 
-apply_pca<- function(x){
-  x<-prcomp(x,center=FALSE,scale=FALSE)
-  x<-as.data.frame(x$x,)
-  return(x)
-}
+# apply_pca<- function(x){
+#   x<-prcomp(x,center=FALSE,scale=FALSE)
+#   x<-as.data.frame(x$x,)
+#   return(x)
+# }
 
 run_model<-function(file){
-  cl <- makeCluster(6)
-  registerDoParallel(cl)
-  finalmodel<-lapply(seq(200000,200000,1000),function(x) general_call(file=file,datasize=x,method="rf",ntree=500,mtry=50) )
-  stopCluster(cl)
+  finalmodel<-lapply(seq(1000,10000,100),function(x) general_call(file=file,datasize=x,method="rf") )
   return(finalmodel)
 }
