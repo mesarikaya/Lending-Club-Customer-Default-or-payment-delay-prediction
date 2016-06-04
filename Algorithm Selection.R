@@ -208,7 +208,7 @@ model_run<-function(sets,method,...){
   # std_levels(traindata,validdata)
   # std_levels(validdata,testdata)
   #registerDoSEQ()
-  cl <- makeCluster(6)
+  cl <- makeCluster(detectCores()-2)
   registerDoSNOW(cl)
   registerDoParallel(cl)
   
@@ -293,6 +293,7 @@ createConfusionMatrix <- function(act, pred) {
   # You've mentioned that neither actual nor predicted may give a complete
   # picture of the available classes, hence:
   numClasses <- max(length(levels(act)), length(levels(pred)))
+  print(numClasses)
   # Sort predicted and actual as it simplifies what's next. You can make this
   # faster by storing `order(act)` in a temporary variable.
   pred <- pred[order(act)]
