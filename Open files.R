@@ -1,9 +1,6 @@
 # Goal: To retrieve the csv files from a specified location
 
-library(memoise)
-
-
-find_csv<- memoise(function(location="./Data/"){
+find_csv<- function(location="./Data/"){
   force(location)
   
   # Search available .csv files  
@@ -12,10 +9,10 @@ find_csv<- memoise(function(location="./Data/"){
   out<-list(loan_csv_files,reject_csv_files)
   return(out)
   
-})
+}
 
 
-open_and_merge_csv<- memoise(function(files){
+open_and_merge_csv<- function(files){
   force(files)
   
   if (!(length(files[[1]])>0)) {
@@ -48,4 +45,4 @@ open_and_merge_csv<- memoise(function(files){
   
   out<-list(loanfiles,rejectfiles)
   return(out)
-})
+}

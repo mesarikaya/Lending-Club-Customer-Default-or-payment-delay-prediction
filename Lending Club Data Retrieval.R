@@ -12,6 +12,7 @@
 
 library (RCurl)
 library (XML)
+library(lubridate)
 
 # Key function to call to scrape the website and start scraping, download and extraction process of csv files
 
@@ -20,11 +21,13 @@ filenames<-function(htmladdress) {
   force(htmladdress)
   # Call scrape function to retrieve the loan files
   files<-scrape(htmladdress)
+  print(files)
   file_names<-unlist(strsplit(unlist(files)[-3],"[|]"))
   #Retrieve the website prefix
   download_prefix<-unlist(files)[3]
   #For all files create a download link
   links<-lapply(file_names, function(x)  paste0(download_prefix,x))
+  print(links)
   #For all files call the download function
   lapply(links,function(x) download_files(x))
 }
@@ -56,7 +59,7 @@ scrape<-function(htmladdress) {
     # Return two outputs for files - (Loan, Download address prefix)
     output<-list(loan_filenames,rejected_loans_filenames,url_prefix) 
     return(output)
-
+    
   }
   
 }
@@ -76,10 +79,10 @@ download_files<-function(links,...){
     unzip_files(paste0("./Data/",basename(links)))
   }
   else{
-      print(paste0("File ", i, " Exists"))
+    print(paste0("File ", i, " Exists"))
   } 
- # data <- read.table(unz(temp,filename=file_names[i],encoding = getOption("encoding")))
-
+  # data <- read.table(unz(temp,filename=file_names[i],encoding = getOption("encoding")))
+  
 }
 
 # Extract the files to the specified folder

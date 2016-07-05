@@ -1,0 +1,367 @@
+---
+title: "Lending Club Loan Data Descriptive Analysis"
+author: "Ergin Sarikaya"
+date: "June 11, 2016"
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 2
+    toc: yes
+    toc_depth: 5
+  pdf_document:
+    toc: yes
+---
+
+
+
+#PURPOSE
+
+Goal of this paper is to understand the underlying details of the data that has been retrieved from <https://www.lendingclub.com/info/download-data.action>. The ultimate purpose is to use these learnings 
+to create a Shiny web application that can enable two things:
+
+1. A tool that can examine a certain customer's final loan payment status
+2. A tool that can illustrate the health of the ongoing loans
+
+#DATA STRUCTURE
+
+In this part, the published open dataset will be analyzed after scraping it from the relevant webpage. The key aim is to see what kind of data is stored in the columns and how clean the data is.
+
+```{r,echo=FALSE,cache=TRUE}
+#install the required libraries
+library("dplyr")
+library("tidyr")
+library("caret")
+library("ggplot2")
+library("DescTools")
+library("lubridate")
+```
+
+```{r setup, echo=FALSE, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = FALSE)
+# Set the working directory
+setwd("C:/Users/Sarikaya.me/Desktop/Transfer files/Transfer files")
+
+# Source the R scripts that can call the relevant functions that is needed for data scraping
+source('./Lending Club Data Retrieval.R')
+source('./Open files.R')
+
+# Call the scraping functions and set the data that is needed to be analyzed
+address<-"https://www.lendingclub.com/info/download-data.action"
+files<-filenames(address)
+loanfiles<-open_and_merge_csv(find_csv())
+
+# Split the Past data and Current data. The analysis are done based on past data.
+pastdata<-subset(loanfiles[[1]],!(loanfiles[[1]]$loan_status=="Current" | loanfiles[[1]]$loan_status=="Does not meet the credit policy. Status:Charged Off" | loanfiles[[1]]$loan_status=="Does not meet the credit policy. Status:Fully Paid" | loanfiles[[1]]$loan_status==""))
+currentdata<-subset(loanfiles[[1]],loanfiles[[1]]$loan_status=="Current")
+```
+
+
+There exists 111 variables. Some of which are no use for further study and some of them have not enough data or do not have enough unique values (>1). These columns are taken out of the data set so that a clearer summary and analysis of the data can be made.
+
+```{r, echo=FALSE, cache=TRUE}
+# Examine the NA ratio per column
+data_length<-nrow(pastdata)
+
+#count NAs and remove columns that has 75% of the time no data
+na_count_pct<-as.data.frame(sapply(pastdata, function(x) sum(is.na(x))/data_length))
+notenoughdata_col_names<-rownames(na_count_pct[which(na_count_pct[1]>=0.75),,drop=FALSE])
+print("These columns have more than 75% not available data:")
+notenoughdata_col_names
+#near zero variables
+nzv <- colnames(pastdata[nearZeroVar(pastdata)])
+print("These columns have not enough variation:")
+nzv
+
+delete_list<-union(notenoughdata_col_names,nzv)
+print("The full list of columns that are taken our of the data")
+delete_list
+
+finaldataset<-pastdata[-which(colnames(pastdata) %in% delete_list)]
+```
+
+
+The general structure of the data is as follows:
+```{r, echo=TRUE,cache=TRUE}
+
+ str(finaldataset)
+ summary(finaldataset)
+
+```
+
+Now there are `r ncol(finaldataset)` more meaningful columns left to examine. Let's examine the levels we observe for **loan_status** variable.
+
+```{r echo=FALSE, cache=TRUE}
+summary(as.factor(finaldataset$loan_status))
+
+loan_status_summary <- ggplot(finaldataset, 
+                  aes(x = as.factor(loan_status)))
+
+loan_status_summary + geom_bar(aes(fill = factor(loan_status))) + 
+  xlab("Count Loan Status State")+ ggtitle("Loan Status Summary")
+
+```
+
+#DESCRIPTIVE ANALYSIS
+
+In general one expects to see relationship between Loan status vs. Loan Amount, Credit Grade, Interest Rate, Annual Income, Total credit balance utilization and purpose. Let's examine these potential relationships one by one. 
+
+## 1. Loan Status versus Loan Amount:
+
+There can be a relationship between loan amount and Loan Status. During this process let's first separate the loan status as risky credits and healthy credits and plot it to see if there is a risk trend through higher loan amounts.
+
+```{r, echo=FALSE, cache=TRUE}
+library("dplyr")
+#set a new column that indicates if a credit is healthy or not
+healthy_credit<-c("Fully Paid")
+
+finaldataset$credit_health<-sapply(finaldataset$loan_status,function(x) {if(x=="Fully Paid"){"Healthy Credit"}else{"Risky Credit"}})
+
+finaldataset$new_loan_amnt<-cut(finaldataset$loan_amnt,seq(0,10)*5000,labels=seq(1,10)*5000)
+
+loan_amnt_data<-finaldataset %>% group_by(as.factor(new_loan_amnt),as.factor(credit_health)) %>% 
+  summarise(value=n())
+colnames(loan_amnt_data)<-c("loan_amnt","credit_health","occ_count")
+
+loan_amnt_data<-loan_amnt_data %>% group_by(loan_amnt) %>% mutate(total=sum(occ_count,na.rm=TRUE))
+
+loan_amnt_data$percentage<-(loan_amnt_data$occ_count/loan_amnt_data$total)*100
+
+subset(loan_amnt_data,loan_amnt_data$credit_health=="Risky Credit")
+
+credit_health_vs_loan_amnt <- ggplot(loan_amnt_data, 
+                    aes(x=loan_amnt,y=occ_count))+
+                    geom_bar(stat="identity",aes(fill=credit_health),position = "stack")+
+                    geom_text(aes(label=round(100-percentage)),vjust="center",hjust="center")+
+                    xlab("Loan Amnt")+ylab("Count") + ggtitle("Credit Health vs Loan Amount")
+
+credit_health_vs_loan_amnt
+```
+
+When the graph is examined, it is interesting to see that there is a decrease in the risky credit ratio as the loan amount increase. Hence loan_amount have the potential to be a factor in determining credit health.
+
+## 2. Loan Status versus Annual Income:
+
+There can also be a relationship between annual income and Loan Status. Let's examine this via looking at below given graph.
+
+```{r, echo=FALSE, cache=TRUE, warning=FALSE}
+finaldataset$new_annual_inc<-cut(finaldataset$annual_inc,seq(0,25)*10000,labels=seq(1,25)*10000)
+
+annual_inc_data<-finaldataset %>% group_by(as.factor(new_annual_inc),as.factor(credit_health)) %>% 
+  summarise(value=n())
+colnames(annual_inc_data)<-c("annual_inc","credit_health","occ_count")
+
+annual_inc_data<-annual_inc_data %>% group_by(annual_inc) %>% mutate(total=sum(occ_count,na.rm=TRUE))
+
+annual_inc_data$percentage<-(annual_inc_data$occ_count/annual_inc_data$total)*100
+
+subset(annual_inc_data,annual_inc_data$credit_health=="Risky Credit")
+
+credit_health_vs_annual_inc <- ggplot(annual_inc_data, 
+                    aes(x=annual_inc,y=occ_count))+
+                    geom_bar(stat="identity",aes(fill=credit_health),position = "stack")+
+                    geom_text(aes(label=round(100-percentage)),vjust="center",hjust="center")+
+                    xlab("Loan Amnt")+ylab("Count") + ggtitle("Credit Health vs Loan Amount")
+
+credit_health_vs_annual_inc
+```
+
+From the graph, we can have the conclusion that annual income **may** have an impact on the final loan status. As the income increases, the tendency to have a risky credit seems to get lower.
+
+## 3. Loan Status versus Grade
+
+As a third look, the relationship between credit health and credit grade is checked via below given plot.
+
+```{r, echo=FALSE, cache=TRUE}
+grade_data<-finaldataset %>% group_by(as.factor(grade),as.factor(credit_health)) %>% 
+  summarise(value=n())
+colnames(grade_data)<-c("grade","credit_health","occ_count")
+
+grade_data<-grade_data %>% group_by(grade) %>% mutate(total=sum(occ_count,na.rm=TRUE))
+
+grade_data$percentage<-(grade_data$occ_count/grade_data$total)*100
+
+subset(grade_data,grade_data$credit_health=="Risky Credit")
+
+credit_health_vs_grade <- ggplot(grade_data, 
+                    aes(x=grade,y=occ_count))+
+                    geom_bar(stat="identity",aes(fill=credit_health),position = "stack")+
+                    geom_text(aes(label=round(100-percentage)),vjust="center",hjust="center")+
+                    xlab("Grade")+ylab("Count") + ggtitle("Credit Health vs Grade") 
+credit_health_vs_grade
+```
+
+It seems that there is a level of relation between grade and credit riskiness. It may be useful to check subgrades and their impacts for more detail.
+
+## 4. Loan Status versus Sub-Grade
+
+Let's see if the relationship between credit health and credit sub-grade is stronger.
+
+```{r, echo=FALSE, cache=TRUE}
+sub_grade_data<-finaldataset %>% group_by(as.factor(sub_grade),as.factor(credit_health)) %>% 
+  summarise(value=n())
+colnames(sub_grade_data)<-c("sub_grade","credit_health","occ_count")
+sub_grade_data<-sub_grade_data %>% group_by(sub_grade) %>% mutate(total=sum(occ_count,na.rm=TRUE))
+sub_grade_data$percentage<-(sub_grade_data$occ_count/sub_grade_data$total)*100
+subset(sub_grade_data,sub_grade_data$credit_health=="Risky Credit")
+
+credit_health_vs_sub_grade <- ggplot(sub_grade_data, 
+                  aes(x=sub_grade,y=occ_count))+
+                  geom_bar(stat="identity",aes(fill=credit_health),position = "stack")+
+                  geom_text(aes(label=round(100-percentage)),vjust="left",hjust="right")+
+                  xlab("Sub-Grade")+ylab("Count") + ggtitle("Credit Health vs Sub-Grade") +coord_flip()
+credit_health_vs_sub_grade
+```
+
+There seems to be a link with sub-grade and the credit health. Percentage keeps increasing as the credit goes down. Credit grade and subgrade needs to be examined as potential factors.
+
+## 5. Loan Status versus Purpose
+
+First, let's check which reasons are mostly given as the purpose of the loan via using word cloud.
+
+```{r, echo=FALSE, cache=TRUE}
+# First, let's load the required libraries and read in the data.
+library("tm")
+library("SnowballC")
+library("wordcloud")
+library("RColorBrewer")
+
+purpose_data <- finaldataset$purpose
+purpose_data<-purpose_data[is.na(purpose_data)==FALSE]
+
+# Now, we will perform a series of operations on the text data to simplify it.
+# First, we need to create a corpus.
+purpose_data <- Corpus(VectorSource(purpose_data))
+ 
+# Next, we will convert the corpus to a plain text document.
+purpose_data <- tm_map(purpose_data, PlainTextDocument)
+ 
+# Then, we will remove all punctuation and stopwords. Stopwords are commonly used words in the English language such as I, me, my, etc. You can see the full list of stopwords using stopwords('english').
+
+purpose_data <- tm_map(purpose_data, removePunctuation)
+purpose_data <- tm_map(purpose_data, removeWords, stopwords('english'))
+
+# Next, we will perform stemming. This means that all the words are converted to their stem (Ex: learning -> learn, walked -> walk, etc.). This will ensure that different forms of the word are converted to the same form and plotted only once in the wordcloud.
+
+purpose_data <- tm_map(purpose_data, stemDocument)
+# dtm <- DocumentTermMatrix(purpose_data)
+# dtm2 <- as.matrix(dtm)
+# frequency <- colSums(dtm2)
+# frequency <- sort(frequency, decreasing=TRUE)
+# Now, we will plot the wordcloud.
+wordscloud<-wordcloud(purpose_data, max.words = 100, 
+                      random.order = FALSE,
+                      rot.per=0.30,
+                      use.r.layout=FALSE,
+                      colors=brewer.pal(8, "Paired"))
+```
+
+Debt Consolidation and credit card debt closure seems to be the top 2 reasons. The rest of the reasons seem to be much less frequently used.
+
+Let's see also via a bar plot how these reasons look versus credit healthiness.
+
+```{r, echo=FALSE, cache=TRUE}
+#Create bar chart to see the relation of purpose data and credit health
+
+purpose_graph_data<-finaldataset %>% group_by(as.factor(purpose),as.factor(credit_health)) %>% 
+  summarise(value=n())
+colnames(purpose_graph_data)<-c("purpose","credit_health","occ_count")
+purpose_graph_data<-purpose_graph_data %>% group_by(purpose) %>% mutate(total=sum(occ_count,na.rm=TRUE))
+
+purpose_graph_data$percentage<-(purpose_graph_data$occ_count/purpose_graph_data$total)*100
+subset(purpose_graph_data,purpose_graph_data$credit_health=="Risky Credit")
+credit_health_vs_purpose_1 <- ggplot(purpose_graph_data, 
+                  aes(x=purpose,y=occ_count))+
+                  geom_bar(stat="identity",aes(fill=credit_health))+
+                  xlab("Purpose")+ylab("Count") + ggtitle("Credit Health vs Purpose")+coord_flip()
+
+credit_health_vs_purpose_1
+
+
+
+```
+
+Since there is a bias that most of the loan purposes are due to debt consolidation, it sounds reasonable to see that most of the risky credit is also there. However, it cannot be easily concluded that it is a major contributor to risk credit.
+
+## 6. Loan Status versus Interest Rate
+
+In general, one expects interest rate to be an indicator of credit riskiness. Therefore, the relationship between credit health and interest rate is checked.
+
+```{r, echo=FALSE, cache=TRUE, warning=FALSE}
+
+# correct int_rate to integer
+finaldataset$int_rate<-gsub(" ","",finaldataset$int_rate)
+finaldataset$int_rate<-gsub("%","",finaldataset$int_rate)
+finaldataset$int_rate<-as.numeric(finaldataset$int_rate)
+
+finaldataset$int_rate_grp<-cut(finaldataset$int_rate,c(0,1,2.3,4,5,6,7,8,9,10,15,20,25,30,40,50,100))
+#Create bar chart to see interest and and credit health progress
+int_data<-finaldataset %>% group_by(as.factor(int_rate_grp),as.factor(credit_health)) %>%
+  summarise(value=n())
+colnames(int_data)<-c("int_rate","credit_health","occ_count")
+credit_health_vs_int_rate <- ggplot(int_data,
+                  aes(x=int_rate,y=occ_count))
+
+credit_health_vs_int_rate  + geom_bar(stat="identity",aes(fill=credit_health))+
+  xlab("Interest Rate")+ylab("Count") + ggtitle("Credit Health vs Interest Rate")
+```
+
+As the interest rate goes up, there is a higher chance of credit failure risk. That is a sound result and it is something expected. 
+
+## Wrap-up
+
+It looks like many of the typical thought indicators seem to have a relation with the health of the credit loan. Below given correlation plots also point to the same direction. However all the graphs plato after a certain level. That is why it is necessary to look at the multivariate impacts of the variables.
+
+```{r, echo=FALSE, warning=FALSE, cache=TRUE}
+library("lubridate")
+library("corrplot")
+# Process certain variables to be able to create a corrplot
+
+# Correct revol_util to integer. The way it is written is " xx%". That has been converted to number without sign
+finaldataset$revol_util<-gsub(" ","",finaldataset$revol_util)
+finaldataset$revol_util<-gsub("%","",finaldataset$revol_util)  
+finaldataset$revol_util<-as.numeric(finaldataset$revol_util)
+
+#Convert Dates into numeric numbers
+finaldataset$issue_d <- mdy(finaldataset$issue_d)
+finaldataset$issue_d<-as.numeric(finaldataset$issue_d)
+finaldataset$earliest_cr_line <- mdy(finaldataset$earliest_cr_line)
+finaldataset$earliest_cr_line<-as.numeric(finaldataset$earliest_cr_line)
+finaldataset$last_pymnt_d <- mdy(finaldataset$last_pymnt_d)
+finaldataset$last_pymnt_d<-as.numeric(finaldataset$last_pymnt_d)
+finaldataset$next_pymnt_d <- mdy(finaldataset$next_pymnt_d)
+finaldataset$next_pymnt_d<-as.numeric(finaldataset$next_pymnt_d)
+finaldataset$last_credit_pull_d <- mdy(finaldataset$last_credit_pull_d)
+finaldataset$last_credit_pull_d<-as.numeric(finaldataset$last_credit_pull_d)
+
+# Convert characters to factors and then numeric to be able to create a corrplot
+for (columns in colnames(finaldataset)){
+  if (is.character(finaldataset[,columns]) || is.factor(finaldataset[,columns])) {
+    #& !columns=="loan_status"
+    finaldataset[,columns]<-as.numeric(as.factor(finaldataset[,columns]))
+  }
+}
+
+```
+
+Below given mapping illustrates which one of the selected variables may have correlation with credit health in detail:
+
+```{r, echo=FALSE, cache=TRUE}
+#Select the varibales that was in our initial interest area for analysis
+variables<-c("loan_status","grade","sub_grade","credit_health","loan_amnt", "annual_inc","int_rate","purpose")
+
+#subset the selected data
+selecteddataset<-finaldataset[which(colnames(finaldataset) %in% variables)]
+
+corrplot(cor(selecteddataset),type="upper")
+```
+
+# CONCLUSION of DESCRIPTIVE ANALYSIS
+
+All in all it is useful to look for multivariate effects via using classification models. Single effects of the commonly thought economic indicators for credit health were not succesfull enough to explain the credit healthiness.
+
+For that purpose **Random forest** model is used to classify the loan types and find which variables work together **to give a better indication of loan status**.
+
+# RANDOM FOREST MACHINE LEARNING MODEL
+
+The machine learning algorithm is run via usage of following R model file General_run.R which can be found in Github in the following link <https://github.com/mesarikaya/Lending-Club-Customer-Default-or-payment-delay-prediction/blob/master/General_run.R>.
+
