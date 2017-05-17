@@ -52,7 +52,7 @@ segment_data<-function(file,m){
   # Remove the single factor columns
   Test <- data[-inTrain_valid,]
   
-  # Create a list to retrun the files
+  # Create a list to rerun the files
   out<-list(Train,Valid,Test)
   
   return(out)
@@ -71,7 +71,7 @@ generic_preprocess<-function(datasets){
   for (features in exclude_names){
     datasets<-datasets[-which(colnames(datasets)==features)]
   }
-  check<<-datasets$loan_status
+  check<-datasets$loan_status
   # datasets<-datasets[-c("out_prncp","out_prncp_inv ")]
 
   # Remove the single factor columns
